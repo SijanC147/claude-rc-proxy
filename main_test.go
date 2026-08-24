@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -49,16 +48,11 @@ func TestHandleVersion(t *testing.T) {
 func TestVersionCommandSkipsStartup(t *testing.T) {
 	tempDir := t.TempDir()
 	binary := filepath.Join(tempDir, "claude-rc-proxy")
-	build := exec.Command("go", "build", "-o", binary, ".")
+	build := exec.Command("go", "build", "-trimpath", "-ldflags",
+		"-X main.version=1.2.3 -X main.commit=abc123", "-o", binary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build executable: %v\n%s", err, output)
 	}
-
-	occupied, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { occupied.Close() })
 
 	home := filepath.Join(tempDir, "home")
 	if err := os.Mkdir(home, 0o700); err != nil {
@@ -72,7 +66,7 @@ func TestVersionCommandSkipsStartup(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"HOME="+home,
 		"CLAUDE_RC_PROXY_CA="+missingCA,
-		"CLAUDE_RC_PROXY_LISTEN="+occupied.Addr().String(),
+		"CLAUDE_RC_PROXY_LISTEN=127.0.0.1:0",
 	)
 	output, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
@@ -81,7 +75,7 @@ func TestVersionCommandSkipsStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version command: %v\n%s", err, output)
 	}
-	if want := "claude-rc-proxy dev (commit unknown)\n"; string(output) != want {
+	if want := "claude-rc-proxy 1.2.3 (commit abc123)\n"; string(output) != want {
 		t.Fatalf("output = %q, want %q", output, want)
 	}
 
