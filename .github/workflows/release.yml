@@ -27,8 +27,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Preflight immutable-release repository policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse preflight outside the canonical fork
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: '[[ "$REPOSITORY" == "SijanC147/claude-rc-proxy" ]]'
+
+      - name: Load source policy read credential from 1Password
+        id: admin_secret
+        uses: 1Password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: false
+          version: 2.39.0
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLAUDE_RC_PROXY_ADMIN_READ_TOKEN: op://CICD/CLAUDE_RC_PROXY_ADMIN_READ_TOKEN/credential
+
+      - name: Require immutable releases before checkout or build
+        env:
+          GH_TOKEN: ${{ steps.admin_secret.outputs.CLAUDE_RC_PROXY_ADMIN_READ_TOKEN }}
+        run: |
+          enabled="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            --jq '.enabled')"
+          [[ "$enabled" == "true" ]]
+
   validate:
     name: Validate release request
+    needs: preflight
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.metadata.outputs.tag }}

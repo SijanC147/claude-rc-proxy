@@ -71,11 +71,12 @@ case "$method $endpoint" in
     echo "$count" >"$count_file"
     run_id=42
     event=workflow_dispatch
-    path='.github/workflows/claude-rc-proxy-release.yml@refs/heads/main'
+    path='.github/workflows/claude-rc-proxy-release.yml'
     branch=main
     repository=SijanC147/homebrew-hextap
     title='claude-rc-proxy v1.2.3 [source-123-1]'
     if [[ "${FAKE_GH_WRONG_RUN:-0}" == 1 ]]; then run_id=99; fi
+    if [[ "${FAKE_GH_WRONG_PATH:-0}" == 1 ]]; then path='.github/workflows/other.yml'; fi
     if [[ "$count" -eq 1 || "${FAKE_GH_STUCK:-0}" == 1 ]]; then
       status=in_progress
       conclusion=null
@@ -112,13 +113,14 @@ if [[ "$actual_calls" != "$expected_calls" ]]; then
   exit 1
 fi
 
-for failure_case in failed-run incomplete-run wrong-run missing-run-id; do
+for failure_case in failed-run incomplete-run wrong-run wrong-path missing-run-id; do
   rm -f "$FAKE_STATE/calls" "$FAKE_STATE/run-count"
-  unset FAKE_GH_FAIL FAKE_GH_STUCK FAKE_GH_WRONG_RUN FAKE_GH_NO_RUN_ID
+  unset FAKE_GH_FAIL FAKE_GH_STUCK FAKE_GH_WRONG_PATH FAKE_GH_WRONG_RUN FAKE_GH_NO_RUN_ID
   case "$failure_case" in
     failed-run) export FAKE_GH_FAIL=1 ;;
     incomplete-run) export FAKE_GH_STUCK=1 ;;
     wrong-run) export FAKE_GH_WRONG_RUN=1 ;;
+    wrong-path) export FAKE_GH_WRONG_PATH=1 ;;
     missing-run-id) export FAKE_GH_NO_RUN_ID=1 ;;
     *) exit 2 ;;
   esac
@@ -134,7 +136,7 @@ for failure_case in failed-run incomplete-run wrong-run missing-run-id; do
     exit 1
   fi
 done
-unset FAKE_GH_FAIL FAKE_GH_STUCK FAKE_GH_WRONG_RUN FAKE_GH_NO_RUN_ID
+unset FAKE_GH_FAIL FAKE_GH_STUCK FAKE_GH_WRONG_PATH FAKE_GH_WRONG_RUN FAKE_GH_NO_RUN_ID
 
 for invalid_case in wrong-tap wrong-source prerelease malformed-commit malformed-correlation unsafe-correlation long-correlation; do
   args=(SijanC147/homebrew-hextap SijanC147/claude-rc-proxy v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION")

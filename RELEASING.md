@@ -43,6 +43,28 @@ tap contents. The public source runner never clones or executes tap content.
 Runtime proxy tokens and CA material must never be stored in GitHub Actions or
 release assets.
 
+The same service account must also be able to read a separate source-policy
+credential:
+
+```text
+op://CICD/CLAUDE_RC_PROXY_ADMIN_READ_TOKEN/credential
+```
+
+`CLAUDE_RC_PROXY_ADMIN_READ_TOKEN` must be a fine-grained token restricted to
+only `SijanC147/claude-rc-proxy`, with exactly:
+
+```text
+Administration: Read
+Metadata:       Read
+Contents:       No access
+```
+
+GitHub's immutable-release settings endpoint requires Administration-read,
+which is not available to the built-in `GITHUB_TOKEN`. This credential is
+loaded only on a fresh preflight runner that performs no checkout and executes
+no repository code. That runner ends before source validation or building
+starts. Do not reuse the tap Actions token or the legacy broad PAT.
+
 The built-in `GITHUB_TOKEN` publishes releases in this repository. The default
 workflow permission can remain read-only because only the release job requests
 `contents: write`, `attestations: write`, and `id-token: write`.
@@ -60,6 +82,12 @@ release is published. The workflow refuses to finish unless
 It also generates build-provenance attestations for every uploaded asset from
 the canonical `.github/workflows/release.yml` workflow.
 
+The isolated preflight job queries the repository immutable-release setting
+before checkout, source validation, quality builds, archive builds, draft
+creation, or publication can start. A disabled or inaccessible setting fails
+the release before public state exists; post-publication attestation
+verification remains a second independent gate.
+
 Add a repository ruleset for `refs/tags/v*` that blocks tag updates and
 deletions. The workflow also resolves the remote tag again immediately before
 publishing and refuses publication if it moved after validation.
@@ -74,6 +102,7 @@ GOTOOLCHAIN=go1.26.0 go test -race -count=1 ./...
 GOTOOLCHAIN=go1.26.0 go vet ./...
 scripts/check-go-format.sh
 scripts/test-release-metadata.sh
+scripts/test-immutable-releases.sh
 ruby scripts/test-homebrew-formula.rb
 scripts/test-publish-release.sh
 scripts/test-dispatch-homebrew-release.sh

@@ -43,6 +43,9 @@ jobs:
       - name: Test release metadata
         run: scripts/test-release-metadata.sh
 
+      - name: Test immutable-release preflight
+        run: scripts/test-immutable-releases.sh
+
       - name: Test Homebrew Formula tooling
         run: ruby scripts/test-homebrew-formula.rb
 

@@ -90,7 +90,7 @@ for ((attempt = 1; attempt <= poll_attempts; attempt++)); do
     run = JSON.parse(File.read(ARGV.fetch(3)))
     abort "workflow run ID mismatch" unless run.fetch("id") == expected_id
     abort "unexpected workflow event" unless run.fetch("event") == "workflow_dispatch"
-    abort "unexpected workflow path" unless run.fetch("path").start_with?(".github/workflows/claude-rc-proxy-release.yml@")
+    abort "unexpected workflow path" unless run.fetch("path") == ".github/workflows/claude-rc-proxy-release.yml"
     abort "workflow did not run from tap main" unless run.fetch("head_branch") == "main"
     abort "workflow repository mismatch" unless run.dig("repository", "full_name") == repository
     abort "workflow correlation mismatch" unless run.fetch("display_title", "").include?("[#{correlation}]")
