@@ -2,12 +2,94 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestHandleVersion(t *testing.T) {
+	oldVersion, oldCommit := version, commit
+	version, commit = "1.2.3", "abc123"
+	t.Cleanup(func() { version, commit = oldVersion, oldCommit })
+
+	tests := []struct {
+		name        string
+		args        []string
+		wantOutput  string
+		wantHandled bool
+	}{
+		{name: "version", args: []string{"--version"}, wantOutput: "claude-rc-proxy 1.2.3 (commit abc123)\n", wantHandled: true},
+		{name: "no args"},
+		{name: "unrelated flag", args: []string{"--help"}},
+		{name: "extra argument", args: []string{"--version", "unexpected"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			if handled := handleVersion(tt.args, &output); handled != tt.wantHandled {
+				t.Fatalf("handleVersion() = %v, want %v", handled, tt.wantHandled)
+			}
+			if got := output.String(); got != tt.wantOutput {
+				t.Fatalf("output = %q, want %q", got, tt.wantOutput)
+			}
+		})
+	}
+}
+
+func TestVersionCommandSkipsStartup(t *testing.T) {
+	tempDir := t.TempDir()
+	binary := filepath.Join(tempDir, "claude-rc-proxy")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build executable: %v\n%s", err, output)
+	}
+
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { occupied.Close() })
+
+	home := filepath.Join(tempDir, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	missingCA := filepath.Join(tempDir, "missing-ca.pem")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "--version")
+	cmd.Env = append(os.Environ(),
+		"HOME="+home,
+		"CLAUDE_RC_PROXY_CA="+missingCA,
+		"CLAUDE_RC_PROXY_LISTEN="+occupied.Addr().String(),
+	)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("version command did not exit promptly: %v", ctx.Err())
+	}
+	if err != nil {
+		t.Fatalf("version command: %v\n%s", err, output)
+	}
+	if want := "claude-rc-proxy dev (commit unknown)\n"; string(output) != want {
+		t.Fatalf("output = %q, want %q", output, want)
+	}
+
+	stateDir := filepath.Join(home, ".local", "state", "claude-rc-proxy")
+	if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("startup state was created: %v", err)
+	}
+}
 
 func testRequest(method, path, body string, contentLength int64) *http.Request {
 	return &http.Request{

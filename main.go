@@ -72,6 +72,8 @@ const (
 )
 
 var (
+	version    = "dev"
+	commit     = "unknown"
 	listenAddr = envOr("CLAUDE_RC_PROXY_LISTEN", "127.0.0.1:9801")
 	poolToken  = os.Getenv("CLAUDE_RC_PROXY_TOKEN")
 	verbose    = os.Getenv("CLAUDE_RC_PROXY_VERBOSE") == "1"
@@ -83,6 +85,14 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func handleVersion(args []string, w io.Writer) bool {
+	if len(args) != 1 || args[0] != "--version" {
+		return false
+	}
+	fmt.Fprintf(w, "claude-rc-proxy %s (commit %s)\n", version, commit)
+	return true
 }
 
 // ───────────────────────────── 日志 ─────────────────────────────
@@ -732,6 +742,9 @@ func truncate(s string, n int) string {
 }
 
 func main() {
+	if handleVersion(os.Args[1:], os.Stdout) {
+		return
+	}
 	initLog()
 	if poolToken == "" {
 		log.Println("WARN   CLAUDE_RC_PROXY_TOKEN 未设置 —— 推理流量会失败,不会静默走订阅额度")
