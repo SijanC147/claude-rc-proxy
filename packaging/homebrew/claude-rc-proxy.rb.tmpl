@@ -1,0 +1,63 @@
+class ClaudeRcProxy < Formula
+  desc "Selective Anthropic proxy preserving Claude Code Remote Control"
+  homepage "https://github.com/SijanC147/claude-rc-proxy"
+  license "MIT"
+
+  if Hardware::CPU.arm?
+    url "@ARM64_URL@"
+    sha256 "@ARM64_SHA256@"
+  else
+    url "@AMD64_URL@"
+    sha256 "@AMD64_SHA256@"
+  end
+
+  depends_on :macos
+
+  def install
+    bin.install "claude-rc-proxy"
+  end
+
+  service do
+    run opt_bin/"claude-rc-proxy"
+    keep_alive successful_exit: false, crashed: true
+    restart_delay 5
+    environment_variables CLAUDE_RC_PROXY_LISTEN: "127.0.0.1:9801"
+    log_path var/"log/claude-rc-proxy/launchd.log"
+    error_log_path var/"log/claude-rc-proxy/launchd.log"
+  end
+
+  def caveats
+    <<~EOS
+      Configure the per-user service environment before starting the proxy:
+
+        install -d -m 700 ~/.homebrew/services
+        $EDITOR ~/.homebrew/services/claude-rc-proxy.env
+        chmod 600 ~/.homebrew/services/claude-rc-proxy.env
+
+      The environment file uses KEY=value lines. Use absolute paths and set:
+
+        CLAUDE_RC_PROXY_CA=/absolute/path/to/combined-ca.pem
+        CLAUDE_RC_PROXY_TOKEN=<pool-token>
+        CLAUDE_RC_PROXY_LISTEN=127.0.0.1:9801
+
+      Start or restart the per-user service without sudo:
+
+        brew services start claude-rc-proxy
+        brew services restart claude-rc-proxy
+        brew services info claude-rc-proxy
+
+      Service output:
+        #{var}/log/claude-rc-proxy/launchd.log
+
+      Route log:
+        ~/.local/state/claude-rc-proxy/route.log
+
+      Claude Code must trust the public CA certificate separately. Never point
+      NODE_EXTRA_CA_CERTS at the combined signer file containing the private key.
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/claude-rc-proxy --version")
+  end
+end

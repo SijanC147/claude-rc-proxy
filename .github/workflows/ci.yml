@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Go and release tooling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Check Go formatting
+        run: test -z "$(gofmt -l ./*.go)"
+
+      - name: Run Go tests
+        run: go test -count=1 ./...
+
+      - name: Run race detector
+        run: go test -race -count=1 ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Build native binary
+        run: go build -trimpath -o "$RUNNER_TEMP/claude-rc-proxy" .
+
+      - name: Test release metadata
+        run: scripts/test-release-metadata.sh
+
+      - name: Test Homebrew Formula tooling
+        run: ruby scripts/test-homebrew-formula.rb
+
+      - name: Test draft-safe release publication
+        run: scripts/test-publish-release.sh
+
+      - name: Test atomic Homebrew publication
+        run: scripts/test-publish-homebrew-formula.sh
+
+      - name: Test secret-free validation ancestry
+        run: scripts/test-secret-ancestry.sh
+
+      - name: Test cross-platform release packaging
+        run: scripts/test-release-packaging.sh
+
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/*.sh
+          shellcheck scripts/*.sh
+
+      - name: Check workflow syntax and expressions
+        run: scripts/check-workflows.sh
+
+      - name: Verify checks created no source changes
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+  homebrew-snapshot:
+    name: Homebrew snapshot install
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@a657b8b0cd35d0f65cce41fce9b24cf054b49869 # 2026.08.24.1
+        with:
+          token: ${{ github.token }}
+
+      - name: Install and test snapshot Formula
+        run: BREW_BIN="$(command -v brew)" scripts/test-homebrew-install.sh
