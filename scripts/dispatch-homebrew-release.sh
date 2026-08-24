@@ -38,7 +38,7 @@ if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
   echo "invalid source commit" >&2
   exit 1
 fi
-if [[ ! "$correlation_id" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+if [[ ! "$correlation_id" =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
   echo "invalid correlation ID" >&2
   exit 1
 fi

@@ -136,7 +136,7 @@ for failure_case in failed-run incomplete-run wrong-run missing-run-id; do
 done
 unset FAKE_GH_FAIL FAKE_GH_STUCK FAKE_GH_WRONG_RUN FAKE_GH_NO_RUN_ID
 
-for invalid_case in wrong-tap wrong-source prerelease malformed-commit malformed-correlation; do
+for invalid_case in wrong-tap wrong-source prerelease malformed-commit malformed-correlation unsafe-correlation long-correlation; do
   args=(SijanC147/homebrew-hextap SijanC147/claude-rc-proxy v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION")
   case "$invalid_case" in
     wrong-tap) args[0]=other/homebrew-hextap ;;
@@ -147,6 +147,8 @@ for invalid_case in wrong-tap wrong-source prerelease malformed-commit malformed
       ;;
     malformed-commit) args[4]=not-a-commit ;;
     malformed-correlation) args[5]='bad correlation' ;;
+    unsafe-correlation) args[5]='source:123' ;;
+    long-correlation) args[5]="$(printf 'a%.0s' {1..101})" ;;
     *) exit 2 ;;
   esac
   set +e
