@@ -8,7 +8,7 @@ Claude Code ≥ 2.1.196 silently disables Remote Control (and `/schedule`, claud
 
 This is a **forward proxy** instead: Claude Code keeps believing it talks to `api.anthropic.com` (gate passes, subscription OAuth works, Remote Control stays on), and at the network layer:
 
-- `/v1/messages*` → rerouted to your pool (`127.0.0.1:8317`, token swapped)
+- `/v1/messages*` → rerouted to your pool (`127.0.0.1:8080`, token swapped)
 - everything else (RC bridge/heartbeat, oauth, bootstrap) → passed through to real Anthropic untouched
 - pool models are injected back into the model picker via the bootstrap response
 

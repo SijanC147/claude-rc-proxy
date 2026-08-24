@@ -8,7 +8,7 @@
 // 自己在直连 api.anthropic.com(两道门禁都过),我们在网络层把推理流量拐去 CPA。
 //
 // 它只做两件事,别的一律原样放行:
-//  1. /v1/messages*                 → 改道 CLIProxyAPI(127.0.0.1:8317),换 token
+//  1. /v1/messages*                 → 改道 CLIProxyAPI(127.0.0.1:8080),换 token
 //  2. /api/claude_cli/bootstrap 的响应 → 把池里的型号塞回模型选择器
 //
 // 为什么用 Go 重写(替掉原来的 mitmproxy + Python addon)
@@ -68,10 +68,12 @@ import (
 
 const (
 	anthropicHost = "api.anthropic.com"
-	upstreamPool  = "127.0.0.1:8317" // CLIProxyAPI
+	upstreamPool  = "127.0.0.1:8080" // Anthropic-compatible inference proxy
 )
 
 var (
+	version    = "dev"
+	commit     = "unknown"
 	listenAddr = envOr("CLAUDE_RC_PROXY_LISTEN", "127.0.0.1:9801")
 	poolToken  = os.Getenv("CLAUDE_RC_PROXY_TOKEN")
 	verbose    = os.Getenv("CLAUDE_RC_PROXY_VERBOSE") == "1"
@@ -83,6 +85,14 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func handleVersion(args []string, w io.Writer) bool {
+	if len(args) != 1 || args[0] != "--version" {
+		return false
+	}
+	fmt.Fprintf(w, "claude-rc-proxy %s (commit %s)\n", version, commit)
+	return true
 }
 
 // ───────────────────────────── 日志 ─────────────────────────────
@@ -732,6 +742,9 @@ func truncate(s string, n int) string {
 }
 
 func main() {
+	if handleVersion(os.Args[1:], os.Stdout) {
+		return
+	}
 	initLog()
 	if poolToken == "" {
 		log.Println("WARN   CLAUDE_RC_PROXY_TOKEN 未设置 —— 推理流量会失败,不会静默走订阅额度")
