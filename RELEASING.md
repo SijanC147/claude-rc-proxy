@@ -4,6 +4,12 @@ Releases are built from existing SemVer tags on the fork's canonical `main`
 branch. Published assets are immutable: fix a bad release with a new patch
 version rather than replacing assets under an existing tag.
 
+The `origin` fork (`SijanC147/claude-rc-proxy`) is the only write, PR, tag, and
+release target. The `dthinkr/claude-rc-proxy` parent is fetch-only: its local
+push URL must remain `no_push`, and upstream synchronization branches and pull
+requests always target the fork's `main`. Never push a branch or tag, open a
+pull request, or publish a release against the parent repository.
+
 ## Repository setup
 
 The release workflow needs one repository secret:
@@ -18,10 +24,12 @@ The 1Password service account must be able to read:
 op://CICD/GH_PAT/credential
 ```
 
-That item contains the separate GitHub credential used only for a bare read of
-`SijanC147/homebrew-hextap` and an atomic Git Data API update. It needs
-repository contents read/write access to that private repository. Runtime proxy
-tokens and CA material must never be stored in GitHub Actions or release assets.
+That item contains the separate GitHub credential used only to send a
+`repository_dispatch` event to `SijanC147/homebrew-hextap` and poll the
+correlated private workflow run. It needs repository contents write permission
+for dispatch plus Actions read permission for polling. The public source runner
+never clones or executes tap content. Runtime proxy tokens and CA material must
+never be stored in GitHub Actions or release assets.
 
 The built-in `GITHUB_TOKEN` publishes releases in this repository. The default
 workflow permission can remain read-only because only the release job requests
@@ -39,11 +47,12 @@ Run the local quality and packaging checks:
 GOTOOLCHAIN=go1.26.0 go test -count=1 ./...
 GOTOOLCHAIN=go1.26.0 go test -race -count=1 ./...
 GOTOOLCHAIN=go1.26.0 go vet ./...
+scripts/check-go-format.sh
 scripts/test-release-metadata.sh
 ruby scripts/test-homebrew-formula.rb
 scripts/test-publish-release.sh
-scripts/test-publish-homebrew-formula.sh
-scripts/test-secret-ancestry.sh
+scripts/test-dispatch-homebrew-release.sh
+ruby scripts/test-release-workflow-graph.rb
 GOTOOLCHAIN=go1.26.0 scripts/test-release-packaging.sh
 scripts/check-workflows.sh
 shellcheck scripts/*.sh
@@ -90,13 +99,18 @@ mode: homebrew-only
 ```
 
 Homebrew-only recovery requires an existing published stable release. It
-downloads and re-verifies release assets and makes up to three isolated
-publication attempts. Each attempt uses one fresh runner to construct and fully
-validate a Formula against an exact tap base commit, then a second fresh runner
-to compare-and-swap that one validated Formula with GitHub's Git Data API.
-Tap-side service settings, caveats, tests, and comments remain unchanged. If
-tap `main` moves, the attempt refuses the update and starts again from the new
-base. The ref update always uses `force: false`.
+dispatches a correlated run in the private tap and waits for its conclusion.
+The private workflow downloads and re-verifies release assets and makes up to
+three isolated publication attempts. Each attempt uses one fresh macOS runner
+to construct and fully validate a Formula against an exact tap base commit,
+then a second fresh runner to compare-and-swap that one validated Formula with
+the tap's same-repository `GITHUB_TOKEN` and Git Data API. Tap-side service
+settings, caveats, tests, and comments remain unchanged. If tap `main` moves,
+the attempt refuses the update and starts again from the new base. The ref
+update always uses `force: false`.
+
+The private tap's `claude-rc-proxy-release.yml` workflow must be present on its
+default branch before creating the first source release tag.
 
 ## Homebrew service configuration
 

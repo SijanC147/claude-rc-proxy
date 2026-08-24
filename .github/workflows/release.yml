@@ -44,6 +44,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Refuse release activity outside the canonical fork
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: '[[ "$REPOSITORY" == "SijanC147/claude-rc-proxy" ]]'
+
       - name: Resolve and validate release metadata
         id: metadata
         env:
@@ -100,7 +105,7 @@ jobs:
 
       - name: Run tagged-source quality gates
         run: |
-          test -z "$(gofmt -l ./*.go)"
+          scripts/check-go-format.sh
           go test -count=1 ./...
           go test -race -count=1 ./...
           go vet ./...
@@ -227,8 +232,8 @@ jobs:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: scripts/publish-release.sh "$GITHUB_REPOSITORY" "$RELEASE_TAG" dist "$PRERELEASE"
 
-  homebrew-assets:
-    name: Prepare Homebrew release metadata
+  homebrew-dispatch:
+    name: Dispatch and monitor private Homebrew publication
     needs:
       - validate
       - release
@@ -245,9 +250,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      arm64_sha: ${{ steps.checksums.outputs.arm64 }}
-      amd64_sha: ${{ steps.checksums.outputs.amd64 }}
     steps:
       - name: Check out release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -255,106 +257,28 @@ jobs:
           ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
 
-      - name: Download and verify published release assets
+      - name: Load private tap dispatch credential from 1Password
+        id: tap_secret
+        uses: 1Password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: false
+          version: 2.39.0
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_COMMIT: ${{ needs.validate.outputs.sha }}
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          GH_PAT: op://CICD/GH_PAT/credential
+
+      - name: Dispatch and wait for correlated private-tap run
+        env:
+          CORRELATION_ID: source-${{ github.run_id }}-${{ github.run_attempt }}
+          GH_TOKEN: ${{ steps.tap_secret.outputs.GH_PAT }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-        run: |
-          mkdir -p dist
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'claude-rc-proxy-*.tar.gz' \
-            --pattern SHA256SUMS \
-            --dir dist
-          scripts/verify-release-assets.sh dist "$RELEASE_VERSION" "$RELEASE_COMMIT"
-
-      - name: Read Darwin checksums
-        id: checksums
-        run: |
-          arm64_sha="$(awk '$2 == "claude-rc-proxy-darwin-arm64.tar.gz" { print $1 }' dist/SHA256SUMS)"
-          amd64_sha="$(awk '$2 == "claude-rc-proxy-darwin-amd64.tar.gz" { print $1 }' dist/SHA256SUMS)"
-          [[ "$arm64_sha" =~ ^[0-9a-f]{64}$ && "$amd64_sha" =~ ^[0-9a-f]{64}$ ]]
-          echo "arm64=$arm64_sha" >> "$GITHUB_OUTPUT"
-          echo "amd64=$amd64_sha" >> "$GITHUB_OUTPUT"
-
-  homebrew-attempt-1:
-    name: Homebrew publication attempt 1
-    needs:
-      - validate
-      - homebrew-assets
-    if: ${{ !cancelled() && needs.homebrew-assets.result == 'success' }}
-    uses: ./.github/workflows/homebrew-attempt.yml
-    with:
-      attempt: 1
-      source_sha: ${{ needs.validate.outputs.sha }}
-      version: ${{ needs.validate.outputs.version }}
-      arm64_sha: ${{ needs.homebrew-assets.outputs.arm64_sha }}
-      amd64_sha: ${{ needs.homebrew-assets.outputs.amd64_sha }}
-    secrets:
-      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-
-  homebrew-attempt-2:
-    name: Homebrew publication attempt 2
-    needs:
-      - validate
-      - homebrew-assets
-      - homebrew-attempt-1
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.homebrew-attempt-1.result == 'success' &&
-        needs.homebrew-attempt-1.outputs.pushed == 'false'
-      }}
-    uses: ./.github/workflows/homebrew-attempt.yml
-    with:
-      attempt: 2
-      source_sha: ${{ needs.validate.outputs.sha }}
-      version: ${{ needs.validate.outputs.version }}
-      arm64_sha: ${{ needs.homebrew-assets.outputs.arm64_sha }}
-      amd64_sha: ${{ needs.homebrew-assets.outputs.amd64_sha }}
-    secrets:
-      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-
-  homebrew-attempt-3:
-    name: Homebrew publication attempt 3
-    needs:
-      - validate
-      - homebrew-assets
-      - homebrew-attempt-2
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.homebrew-attempt-2.result == 'success' &&
-        needs.homebrew-attempt-2.outputs.pushed == 'false'
-      }}
-    uses: ./.github/workflows/homebrew-attempt.yml
-    with:
-      attempt: 3
-      source_sha: ${{ needs.validate.outputs.sha }}
-      version: ${{ needs.validate.outputs.version }}
-      arm64_sha: ${{ needs.homebrew-assets.outputs.arm64_sha }}
-      amd64_sha: ${{ needs.homebrew-assets.outputs.amd64_sha }}
-    secrets:
-      OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-
-  homebrew-result:
-    name: Confirm Homebrew publication
-    needs:
-      - homebrew-attempt-1
-      - homebrew-attempt-2
-      - homebrew-attempt-3
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require one successful publication attempt
-        env:
-          PUSHED_1: ${{ needs.homebrew-attempt-1.outputs.pushed }}
-          PUSHED_2: ${{ needs.homebrew-attempt-2.outputs.pushed }}
-          PUSHED_3: ${{ needs.homebrew-attempt-3.outputs.pushed }}
-        run: |
-          if [[ "$PUSHED_1" != "true" && "$PUSHED_2" != "true" && "$PUSHED_3" != "true" ]]; then
-            echo "failed to publish Homebrew Formula after 3 isolated, validated attempts" >&2
-            exit 1
-          fi
+          SOURCE_COMMIT: ${{ needs.validate.outputs.sha }}
+        run: >-
+          scripts/dispatch-homebrew-release.sh
+          SijanC147/homebrew-hextap
+          "$GITHUB_REPOSITORY"
+          "$RELEASE_TAG"
+          "$RELEASE_VERSION"
+          "$SOURCE_COMMIT"
+          "$CORRELATION_ID"

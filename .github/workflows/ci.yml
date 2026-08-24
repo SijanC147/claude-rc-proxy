@@ -26,7 +26,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Check Go formatting
-        run: test -z "$(gofmt -l ./*.go)"
+        run: scripts/check-go-format.sh
 
       - name: Run Go tests
         run: go test -count=1 ./...
@@ -49,11 +49,11 @@ jobs:
       - name: Test draft-safe release publication
         run: scripts/test-publish-release.sh
 
-      - name: Test atomic Homebrew publication
-        run: scripts/test-publish-homebrew-formula.sh
+      - name: Test private Homebrew dispatch and polling
+        run: scripts/test-dispatch-homebrew-release.sh
 
-      - name: Test secret-free validation ancestry
-        run: scripts/test-secret-ancestry.sh
+      - name: Test release workflow graph
+        run: ruby scripts/test-release-workflow-graph.rb
 
       - name: Test cross-platform release packaging
         run: scripts/test-release-packaging.sh

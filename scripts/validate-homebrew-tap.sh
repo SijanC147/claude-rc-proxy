@@ -2,9 +2,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SECRET_ANCESTOR_STOP_PID="$PPID" "$SCRIPT_DIR/assert-no-secret-ancestors.sh"
-
 if [[ $# -ne 2 ]]; then
   echo "usage: validate-homebrew-tap.sh <tap-directory> <owner/tap>" >&2
   exit 64
@@ -25,6 +22,7 @@ tap_owner_dir="$(brew --repository)/Library/Taps/$owner"
 tap_link="$tap_owner_dir/homebrew-$repository"
 formula="$tap_name/claude-rc-proxy"
 installed=false
+service_test_root=""
 
 cleanup() {
   if [[ "$installed" == "true" ]]; then
@@ -34,6 +32,9 @@ cleanup() {
     unlink "$tap_link"
   fi
   rmdir "$tap_owner_dir" >/dev/null 2>&1 || true
+  if [[ -n "$service_test_root" ]]; then
+    rm -rf -- "$service_test_root"
+  fi
 }
 trap cleanup EXIT
 
@@ -57,6 +58,28 @@ if [[ "${HOMEBREW_FORMULA_SKIP_INSTALL:-0}" != "1" ]]; then
   brew install --formula "$formula"
   installed=true
   brew test "$formula"
+
+  service_test_root="$(mktemp -d)"
+  service_config_home="$service_test_root/config/homebrew"
+  service_env="$service_config_home/services/claude-rc-proxy.env"
+  mkdir -p "$service_config_home/services"
+  chmod 700 "$service_test_root/config" "$service_config_home" "$service_config_home/services"
+  cat > "$service_env" <<'SERVICE_ENVIRONMENT'
+CLAUDE_RC_PROXY_CA=/tmp/claude-rc-proxy-test-ca.pem
+CLAUDE_RC_PROXY_TOKEN=service-test-token
+CLAUDE_RC_PROXY_LISTEN=127.0.0.1:65432
+SERVICE_ENVIRONMENT
+  chmod 600 "$service_env"
+  XDG_CONFIG_HOME="$service_test_root/config" brew ruby -e '
+    formula = Formula[ARGV.fetch(0)]
+    effective = formula.service.effective_environment_variables
+    expected = {
+      CLAUDE_RC_PROXY_CA: "/tmp/claude-rc-proxy-test-ca.pem",
+      CLAUDE_RC_PROXY_TOKEN: "service-test-token",
+      CLAUDE_RC_PROXY_LISTEN: "127.0.0.1:65432",
+    }
+    abort "service environment override mismatch" unless effective == expected
+  ' -- "$formula"
 fi
 
 cleanup
