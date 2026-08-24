@@ -112,6 +112,18 @@ update always uses `force: false`.
 The private tap's `claude-rc-proxy-release.yml` workflow must be present on its
 default branch before creating the first source release tag.
 
+The private tap owns the production Formula template, metadata updater, asset
+verifier, Homebrew/service validator, and CAS publisher. Public release tags
+supply only immutable archives and validated release metadata; the tap workflow
+does not execute source-repository scripts. The source-side Formula tooling is
+used only for local snapshot tests.
+
+The Formula intentionally omits an explicit `version` stanza. Homebrew derives
+the stable version from the two identical GitHub release URL versions, and
+Homebrew 6.0.19 strict audit rejects the equivalent explicit stanza as
+redundant. Stable updates therefore change exactly two URLs and two SHA-256
+values while preserving all tap-owned content.
+
 ## Homebrew service configuration
 
 After the Formula is published:

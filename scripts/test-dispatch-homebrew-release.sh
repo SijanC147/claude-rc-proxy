@@ -57,6 +57,8 @@ case "$method $endpoint" in
     echo "$count" > "$count_file"
     if [[ "$count" -eq 1 ]]; then
       echo '{"workflow_runs":[]}'
+    elif [[ "${FAKE_GH_UNRELATED:-0}" == "1" ]]; then
+      echo '{"workflow_runs":[{"id":99,"display_title":"claude-rc-proxy v1.2.3 [other-run]"}]}'
     else
       echo '{"workflow_runs":[{"id":42,"display_title":"claude-rc-proxy v1.2.3 [source-123-1]"}]}'
     fi
@@ -67,7 +69,7 @@ case "$method $endpoint" in
     [[ ! -f "$count_file" ]] || count="$(cat "$count_file")"
     count=$((count + 1))
     echo "$count" > "$count_file"
-    if [[ "$count" -eq 1 ]]; then
+    if [[ "${FAKE_GH_STUCK:-0}" == "1" || "$count" -eq 1 ]]; then
       echo '{"status":"in_progress","conclusion":null,"html_url":"https://example.invalid/run/42"}'
     elif [[ "${FAKE_GH_FAIL:-0}" == "1" ]]; then
       echo '{"status":"completed","conclusion":"failure","html_url":"https://example.invalid/run/42"}'
@@ -102,6 +104,45 @@ if POLL_ATTEMPTS=1 POLL_INTERVAL_SECONDS=0 \
   other-owner/homebrew-hextap SijanC147/claude-rc-proxy \
   v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION" >/dev/null 2>&1; then
   echo "non-canonical tap target was accepted" >&2
+  exit 1
+fi
+
+for invalid_case in wrong-source prerelease malformed-commit malformed-correlation
+do
+  args=(SijanC147/homebrew-hextap SijanC147/claude-rc-proxy v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION")
+  case "$invalid_case" in
+    wrong-source) args[1]=other/claude-rc-proxy ;;
+    prerelease)
+      args[2]=v1.2.3-rc.1
+      args[3]=1.2.3-rc.1
+      ;;
+    malformed-commit) args[4]=not-a-commit ;;
+    malformed-correlation) args[5]='bad correlation' ;;
+    *) exit 2 ;;
+  esac
+  if POLL_ATTEMPTS=1 POLL_INTERVAL_SECONDS=0 \
+    "$SCRIPT_DIR/dispatch-homebrew-release.sh" "${args[@]}" >/dev/null 2>&1; then
+    echo "invalid dispatch accepted: $invalid_case" >&2
+    exit 1
+  fi
+done
+
+echo 0 > "$FAKE_STATE/list-count"
+if FAKE_GH_UNRELATED=1 POLL_ATTEMPTS=2 POLL_INTERVAL_SECONDS=0 \
+  "$SCRIPT_DIR/dispatch-homebrew-release.sh" \
+  SijanC147/homebrew-hextap SijanC147/claude-rc-proxy \
+  v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION" >/dev/null 2>&1; then
+  echo "unrelated workflow run was accepted" >&2
+  exit 1
+fi
+
+echo 1 > "$FAKE_STATE/list-count"
+echo 0 > "$FAKE_STATE/run-count"
+if FAKE_GH_STUCK=1 POLL_ATTEMPTS=2 POLL_INTERVAL_SECONDS=0 \
+  "$SCRIPT_DIR/dispatch-homebrew-release.sh" \
+  SijanC147/homebrew-hextap SijanC147/claude-rc-proxy \
+  v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION" >/dev/null 2>&1; then
+  echo "incomplete workflow run was accepted" >&2
   exit 1
 fi
 

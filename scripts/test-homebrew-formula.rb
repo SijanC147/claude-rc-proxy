@@ -32,6 +32,7 @@ class HomebrewFormulaTest < Minitest::Test
     assert_includes formula, %(sha256 "#{ARM_SHA}")
     assert_includes formula, %(sha256 "#{AMD_SHA}")
     assert_includes formula, "if Hardware::CPU.arm?"
+    refute_match(/^\s*version\s/m, formula)
     assert_includes formula, "depends_on :macos"
     assert_includes formula, "service do"
     assert_includes formula, "~/.homebrew/services/claude-rc-proxy.env"
@@ -39,6 +40,13 @@ class HomebrewFormulaTest < Minitest::Test
     refute_match(/@[A-Z0-9_]+@/, formula)
     refute_includes formula, "local-loopback-sentinel"
     refute_includes formula, "rootCA-key"
+  end
+
+  def test_version_is_derived_from_the_two_release_urls
+    formula = render(version: "3.4.5")
+
+    assert_equal 2, formula.scan("/releases/download/v3.4.5/").length
+    refute_match(/^\s*version\s/m, formula)
   end
 
   def test_update_changes_only_release_metadata_and_is_idempotent

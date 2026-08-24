@@ -16,14 +16,34 @@ correlation_id="$6"
 poll_attempts="${POLL_ATTEMPTS:-160}"
 poll_interval="${POLL_INTERVAL_SECONDS:-15}"
 
-[[ "$tap_repository" == "SijanC147/homebrew-hextap" ]]
-[[ "$source_repository" == "SijanC147/claude-rc-proxy" ]]
-[[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-[[ "$version" == "${tag#v}" ]]
-[[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
-[[ "$correlation_id" =~ ^[A-Za-z0-9._:-]+$ ]]
-[[ "$poll_attempts" =~ ^[1-9][0-9]*$ ]]
-[[ "$poll_interval" =~ ^[0-9]+$ ]]
+if [[ "$tap_repository" != "SijanC147/homebrew-hextap" ]]; then
+  echo "refusing to dispatch outside the canonical private tap" >&2
+  exit 1
+fi
+if [[ "$source_repository" != "SijanC147/claude-rc-proxy" ]]; then
+  echo "refusing to dispatch from a non-canonical source repository" >&2
+  exit 1
+fi
+if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "Homebrew dispatch requires a stable SemVer tag" >&2
+  exit 1
+fi
+if [[ "$version" != "${tag#v}" ]]; then
+  echo "release version does not match tag" >&2
+  exit 1
+fi
+if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "invalid source commit" >&2
+  exit 1
+fi
+if [[ ! "$correlation_id" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+  echo "invalid correlation ID" >&2
+  exit 1
+fi
+if [[ ! "$poll_attempts" =~ ^[1-9][0-9]*$ || ! "$poll_interval" =~ ^[0-9]+$ ]]; then
+  echo "invalid polling bounds" >&2
+  exit 1
+fi
 
 state_dir="$(mktemp -d)"
 cleanup() {
