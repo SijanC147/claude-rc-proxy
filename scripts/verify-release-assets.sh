@@ -75,10 +75,32 @@ for target in "${targets[@]}"; do
 
   file_output="$(file "$extract_dir/claude-rc-proxy")"
   case "$target_name" in
-    darwin-arm64) [[ "$file_output" == *"Mach-O 64-bit executable arm64"* ]] ;;
-    darwin-amd64) [[ "$file_output" == *"Mach-O 64-bit executable x86_64"* ]] ;;
-    linux-arm64) [[ "$file_output" == *"ELF 64-bit LSB executable"*"ARM aarch64"*"statically linked"* ]] ;;
-    linux-amd64) [[ "$file_output" == *"ELF 64-bit LSB executable"*"x86-64"*"statically linked"* ]] ;;
+    darwin-arm64)
+      if [[ "$file_output" != *"Mach-O 64-bit executable arm64"* &&
+            "$file_output" != *"Mach-O 64-bit arm64 executable"* ]]; then
+        echo "unexpected Darwin arm64 binary format: $file_output" >&2
+        exit 1
+      fi
+      ;;
+    darwin-amd64)
+      if [[ "$file_output" != *"Mach-O 64-bit executable x86_64"* &&
+            "$file_output" != *"Mach-O 64-bit x86_64 executable"* ]]; then
+        echo "unexpected Darwin amd64 binary format: $file_output" >&2
+        exit 1
+      fi
+      ;;
+    linux-arm64)
+      if [[ "$file_output" != *"ELF 64-bit LSB executable"*"ARM aarch64"*"statically linked"* ]]; then
+        echo "unexpected Linux arm64 binary format: $file_output" >&2
+        exit 1
+      fi
+      ;;
+    linux-amd64)
+      if [[ "$file_output" != *"ELF 64-bit LSB executable"*"x86-64"*"statically linked"* ]]; then
+        echo "unexpected Linux amd64 binary format: $file_output" >&2
+        exit 1
+      fi
+      ;;
   esac
 
   if [[ "$goos" == "$host_os" && "$goarch" == "$host_arch" ]]; then
