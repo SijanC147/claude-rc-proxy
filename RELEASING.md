@@ -21,19 +21,44 @@ OP_SERVICE_ACCOUNT_TOKEN
 The 1Password service account must be able to read:
 
 ```text
-op://CICD/GH_PAT/credential
+op://CICD/HOMEBREW_TAP_ACTIONS_TOKEN/credential
 ```
 
-That item contains the separate GitHub credential used only to send a
-`repository_dispatch` event to `SijanC147/homebrew-hextap` and poll the
-correlated private workflow run. It needs repository contents write permission
-for dispatch plus Actions read permission for polling. The public source runner
-never clones or executes tap content. Runtime proxy tokens and CA material must
-never be stored in GitHub Actions or release assets.
+Create that as a new 1Password item. Do not replace or modify
+`op://CICD/GH_PAT/credential`; `better-ccflare` still depends on the existing
+credential.
+
+`HOMEBREW_TAP_ACTIONS_TOKEN` must be a fine-grained GitHub token restricted to
+only `SijanC147/homebrew-hextap`, with exactly:
+
+```text
+Actions:  Read and write
+Metadata: Read
+Contents: No access
+```
+
+The source workflow uses it only to trigger `workflow_dispatch`, receive that
+API call's exact workflow run ID, and poll that run. It cannot read or mutate
+tap contents. The public source runner never clones or executes tap content.
+Runtime proxy tokens and CA material must never be stored in GitHub Actions or
+release assets.
 
 The built-in `GITHUB_TOKEN` publishes releases in this repository. The default
 workflow permission can remain read-only because only the release job requests
-`contents: write`.
+`contents: write`, `attestations: write`, and `id-token: write`.
+
+Before creating `v0.1.0`, enable immutable releases in the source fork:
+
+1. Open `SijanC147/claude-rc-proxy` on GitHub.
+2. Open `Settings`.
+3. Scroll to the `Releases` section.
+4. Select `Enable release immutability`.
+
+This applies only to future releases, so it must be enabled before the first
+release is published. The workflow refuses to finish unless
+`gh release verify <tag>` confirms the resulting immutable release attestation.
+It also generates build-provenance attestations for every uploaded asset from
+the canonical `.github/workflows/release.yml` workflow.
 
 Add a repository ruleset for `refs/tags/v*` that blocks tag updates and
 deletions. The workflow also resolves the remote tag again immediately before
@@ -68,6 +93,13 @@ git tag -a v0.1.0 -m "claude-rc-proxy v0.1.0"
 git push origin v0.1.0
 ```
 
+Tag pushes are the normal full-release path. If a full release is ever started
+manually, select the release tag itself in GitHub's `Use workflow from`
+selector, or invoke `gh workflow run Release --ref <tag>`. Full mode refuses a
+branch-context dispatch because build-provenance attestations must bind to the
+exact tagged commit. `homebrew-only` recovery may still run from `main` because
+it does not build or attest new assets.
+
 Stable tags must match `vX.Y.Z`. Prereleases use strict SemVer such as
 `v0.2.0-rc.1`. Prereleases publish GitHub assets but never update Homebrew.
 
@@ -99,15 +131,22 @@ mode: homebrew-only
 ```
 
 Homebrew-only recovery requires an existing published stable release. It
-dispatches a correlated run in the private tap and waits for its conclusion.
-The private workflow downloads and re-verifies release assets and makes up to
-three isolated publication attempts. Each attempt uses one fresh macOS runner
-to construct and fully validate a Formula against an exact tap base commit,
-then a second fresh runner to compare-and-swap that one validated Formula with
-the tap's same-repository `GITHUB_TOKEN` and Git Data API. Tap-side service
-settings, caveats, tests, and comments remain unchanged. If tap `main` moves,
-the attempt refuses the update and starts again from the new base. The ref
-update always uses `force: false`.
+starts the private tap's `workflow_dispatch` workflow and polls the exact run ID
+returned by GitHub. Exact-run polling is bounded to 210 minutes and the source
+job to 220 minutes, covering all three bounded attempts plus queue allowance.
+
+The private workflow independently verifies the immutable release attestation
+and workflow-bound build provenance for every asset. Each attempt separates:
+
+1. trusted tap-tool snapshotting;
+2. inert Formula preparation;
+3. whole-tap lint/audit without executing the public binary;
+4. fresh minimal-tap runtime/service validation;
+5. fresh `force: false` Git Data API publication.
+
+Tap-side service settings, caveats, tests, and comments remain unchanged. If
+tap `main` moves, the attempt refuses the update and starts again from the new
+base.
 
 The private tap's `claude-rc-proxy-release.yml` workflow must be present on its
 default branch before creating the first source release tag.
