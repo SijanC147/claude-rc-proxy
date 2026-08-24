@@ -157,7 +157,7 @@ func TestDirectorAddsReplayOnlyToDirectAllowlist(t *testing.T) {
 	messageBody := `{"model":"test","messages":[]}`
 	message := testRequest(http.MethodPost, "/v1/messages", messageBody, int64(len(messageBody)))
 	rp.Director(message)
-	if message.URL.Scheme != "http" || message.URL.Host != upstreamPool || message.GetBody != nil {
+	if message.URL.Scheme != "http" || message.URL.Host != "127.0.0.1:8080" || message.GetBody != nil {
 		t.Fatalf("message route/replay wrong: url=%s getBody=%v", message.URL.String(), message.GetBody != nil)
 	}
 }

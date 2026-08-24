@@ -8,7 +8,7 @@
 // 自己在直连 api.anthropic.com(两道门禁都过),我们在网络层把推理流量拐去 CPA。
 //
 // 它只做两件事,别的一律原样放行:
-//  1. /v1/messages*                 → 改道 CLIProxyAPI(127.0.0.1:8317),换 token
+//  1. /v1/messages*                 → 改道 CLIProxyAPI(127.0.0.1:8080),换 token
 //  2. /api/claude_cli/bootstrap 的响应 → 把池里的型号塞回模型选择器
 //
 // 为什么用 Go 重写(替掉原来的 mitmproxy + Python addon)
@@ -68,7 +68,7 @@ import (
 
 const (
 	anthropicHost = "api.anthropic.com"
-	upstreamPool  = "127.0.0.1:8317" // CLIProxyAPI
+	upstreamPool  = "127.0.0.1:8080" // Anthropic-compatible inference proxy
 )
 
 var (
