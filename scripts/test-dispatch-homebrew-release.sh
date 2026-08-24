@@ -101,7 +101,7 @@ POLL_ATTEMPTS=5 POLL_INTERVAL_SECONDS=0 \
   SijanC147/homebrew-hextap SijanC147/claude-rc-proxy \
   v1.2.3 1.2.3 "$SOURCE_SHA" "$CORRELATION"
 
-if rg -q '/contents|/git/|repos/SijanC147/homebrew-hextap/dispatches' "$FAKE_STATE/calls"; then
+if grep -Eq '/contents|/git/|repos/SijanC147/homebrew-hextap/dispatches' "$FAKE_STATE/calls"; then
   echo "Actions-only credential path attempted repository contents mutation" >&2
   exit 1
 fi
