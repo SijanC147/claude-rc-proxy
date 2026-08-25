@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+: "${HEXTAP_TARGET_OS:?}"
+: "${HEXTAP_TARGET_ARCH:?}"
+: "${HEXTAP_OUTPUT:?}"
+: "${HEXTAP_VERSION:?}"
+: "${HEXTAP_COMMIT:?}"
+
+[[ "$HEXTAP_TARGET_OS" == darwin || "$HEXTAP_TARGET_OS" == linux ]]
+[[ "$HEXTAP_TARGET_ARCH" == arm64 || "$HEXTAP_TARGET_ARCH" == amd64 ]]
+[[ "$HEXTAP_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+[[ "$HEXTAP_COMMIT" =~ ^[0-9a-f]{7,64}$ ]]
+
+CGO_ENABLED=0 GOOS="$HEXTAP_TARGET_OS" GOARCH="$HEXTAP_TARGET_ARCH" \
+  go build -trimpath \
+  -ldflags "-s -w -X main.version=$HEXTAP_VERSION -X main.commit=$HEXTAP_COMMIT" \
+  -o "$HEXTAP_OUTPUT" .
