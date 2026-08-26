@@ -14,7 +14,33 @@ This is a **forward proxy** instead: Claude Code keeps believing it talks to `ap
 
 Single Go binary, ~500 lines, one goroutine per connection.
 
-## Setup
+## Install with Homebrew
+
+Stable releases are published through the immutable Hextap workflow to the
+private tap:
+
+```sh
+brew install sean/hextap/claude-rc-proxy
+```
+
+Resolve Homebrew's XDG-aware per-user configuration root instead of assuming
+`~/.homebrew`:
+
+```sh
+service_config_home="$(brew ruby -e 'print ENV.fetch("HOMEBREW_USER_CONFIG_HOME")')"
+install -d -m 700 "$service_config_home/services"
+$EDITOR "$service_config_home/services/claude-rc-proxy.env"
+chmod 600 "$service_config_home/services/claude-rc-proxy.env"
+```
+
+The service environment file uses `KEY=value` lines. Use absolute paths and
+set `CLAUDE_RC_PROXY_CA` to the machine-local combined signer,
+`CLAUDE_RC_PROXY_TOKEN` to the pool credential, and
+`CLAUDE_RC_PROXY_LISTEN=127.0.0.1:9801`. Run the per-user service without
+`sudo`. See [RELEASING.md](RELEASING.md) for the immutable caller, direct-tap
+publication, recovery window, and verification contract.
+
+## Build from source
 
 ```sh
 go build -o claude-rc-proxy-go .
@@ -28,14 +54,15 @@ CLAUDE_RC_PROXY_TOKEN=<your-pool-token> ./claude-rc-proxy-go   # listens on 127.
 {
   "env": {
     "https_proxy": "http://127.0.0.1:9801",
-    "NODE_EXTRA_CA_CERTS": "~/.mitmproxy/mitmproxy-ca-cert.pem"
+    "NODE_EXTRA_CA_CERTS": "/absolute/path/to/public-mkcert-root.pem"
   }
 }
 ```
 
 ⚠️ `NODE_EXTRA_CA_CERTS` must be in the process environment **before** Claude Code starts — setting it in `settings.json` env alone is not enough for the compiled Bun binary's bridge TLS (it initializes trust stores at startup). Use shell export or `launchctl setenv`.
 
-The TLS CA is reused from mitmproxy (`~/.mitmproxy/mitmproxy-ca.pem`), so any existing mitmproxy-based setup migrates without client changes.
+Claude Code must receive only the public root. Never point
+`NODE_EXTRA_CA_CERTS` at the combined signer file containing the private key.
 
 ## Design notes
 
