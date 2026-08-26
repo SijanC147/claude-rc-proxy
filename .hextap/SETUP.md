@@ -1,0 +1,37 @@
+# Hextap setup
+
+Onboarding created only local files and did not inspect or mutate any remote repository, secret, ruleset, release, or tap.
+
+Before releasing, make `main` the default branch and enable immutable releases for `SijanC147/claude-rc-proxy`.
+
+Set the one required Actions secret. This command prompts securely; do not put a value in argv or a file:
+
+```sh
+gh secret set OP_SERVICE_ACCOUNT_TOKEN --repo github.com/SijanC147/claude-rc-proxy
+```
+
+Review the two owned ruleset payloads:
+
+```sh
+cat .hextap/rulesets/main.json
+cat .hextap/rulesets/release-tags.json
+```
+
+Apply each reviewed payload manually:
+
+```sh
+gh api --hostname github.com --method POST repos/SijanC147/claude-rc-proxy/rulesets --input .hextap/rulesets/main.json
+gh api --hostname github.com --method POST repos/SijanC147/claude-rc-proxy/rulesets --input .hextap/rulesets/release-tags.json
+```
+
+The tap registration destination is exactly `Projects/claude-rc-proxy.json`, but the initial tap pull request must not contain that JSON alone. It must pair the byte-exact `.hextap/tap-registration.json` with `Formula/claude-rc-proxy.rb`, and that Formula must declare `class ClaudeRcProxy < Formula`. The tap remains the Formula registry; the paired pull request and merge are owner-controlled manual actions.
+
+Coordinator bootstrap/recovery is an external adopter task:
+
+1. Merge the reviewed onboarding files to `main`, apply the two reviewed rulesets, set the required secret, and enable immutable releases.
+2. Push the first stable tag and let the full caller create and verify the immutable source release. When the project is not registered yet, the initial Homebrew publication can stop at the tap registry gate; do not replace or recreate that release.
+3. From that immutable release and its verified `SHA256SUMS`, have the coordinator use the trusted pinned toolkit to render the exact Formula. Do not invent checksums or commit a placeholder Formula.
+4. Open one tap pull request that adds both `Projects/claude-rc-proxy.json` and the release-backed `Formula/claude-rc-proxy.rb`; merge only after tap CI passes.
+5. Dispatch the existing stable tag in `homebrew-only` mode to finish or recover publication. Do not create a replacement tag.
+
+The caller is pinned to stable toolkit tag `v0.1.0` at full commit `2d4b4615829f983bb4ea7ff2a4b154fb56fd16ea`; keep both the tag comment and immutable SHA provenance when upgrading. Never replace the pin with `@main` or a floating major tag.

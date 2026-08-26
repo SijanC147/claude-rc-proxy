@@ -1,98 +1,114 @@
 # frozen_string_literal: true
 
-release_workflow = File.expand_path("../.github/workflows/release.yml", __dir__)
-workflow = File.read(release_workflow)
-ci_workflow = File.read(File.expand_path("../.github/workflows/ci.yml", __dir__))
-dispatch_script = File.read(File.expand_path("dispatch-homebrew-release.sh", __dir__))
-release_docs = File.read(File.expand_path("../RELEASING.md", __dir__))
-abort "missing canonical fork release guard" unless workflow.include?('[[ "$REPOSITORY" == "SijanC147/claude-rc-proxy" ]]')
-preflight_position = workflow.index("Require immutable releases before checkout or build")
-validate_position = workflow.index(/^  validate:/)
-build_position = workflow.index(/^  build:/)
-release_position = workflow.index(/^  release:/)
-unless preflight_position && validate_position && build_position && release_position &&
-       preflight_position < validate_position && preflight_position < build_position &&
-       preflight_position < release_position
-  abort "immutable-release preflight must run before build and publication"
-end
-preflight_block = workflow[/^  preflight:\n(?<body>.*?)(?=^  validate:)/m, :body]
-abort "missing isolated immutable-release preflight job" unless preflight_block
-if preflight_block.include?("actions/checkout") || preflight_block.include?("scripts/")
-  abort "immutable-release policy token job must not execute repository code"
-end
-unless preflight_block.include?("op://CICD/CLAUDE_RC_PROXY_ADMIN_READ_TOKEN/credential")
-  abort "immutable-release preflight lacks its dedicated Administration-read token"
-end
-if preflight_block.include?("github.token")
-  abort "immutable-release preflight incorrectly uses the built-in GITHUB_TOKEN"
-end
-unless preflight_block.include?("repos/$GITHUB_REPOSITORY/immutable-releases") &&
-       preflight_block.include?('[[ "$enabled" == "true" ]]')
-  abort "immutable-release preflight does not require the live repository setting"
-end
-unless workflow[/^  validate:\n(?<body>.*?)(?=^  build:)/m, :body].include?("needs: preflight")
-  abort "source validation can run without immutable-release preflight"
-end
-unless ci_workflow.include?("scripts/test-immutable-releases.sh")
-  abort "CI does not test the immutable-release preflight"
-end
-abort "macos-14 runner remains in source workflows" if workflow.include?("macos-14") || ci_workflow.include?("macos-14")
-abort "missing immutable release verification" unless workflow.include?('gh release verify "$RELEASE_TAG"')
-abort "full release is not bound to its tag ref" unless workflow.include?(
-  '[[ "$GITHUB_REF" == "refs/tags/$RELEASE_TAG" ]]',
-)
-abort "full release is not bound to its tagged commit" unless workflow.include?(
-  '[[ "$GITHUB_SHA" == "$RELEASE_COMMIT" ]]',
-)
-abort "missing workflow-bound build provenance" unless workflow.include?(
-  "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
-)
-homebrew_jobs = workflow.scan(/^  (homebrew[^:]*):/).flatten
-abort "unexpected Homebrew jobs: #{homebrew_jobs.inspect}" unless homebrew_jobs == ["homebrew-dispatch"]
+require "yaml"
 
-dispatch_block = workflow[/^  homebrew-dispatch:\n(?<body>.*)\z/m, :body]
-abort "missing Homebrew dispatch job" unless dispatch_block
-required_fragments = [
-  "needs.validate.outputs.stable == 'true'",
-  "needs.validate.outputs.mode == 'full' && needs.release.result == 'success'",
-  "needs.validate.outputs.mode == 'homebrew-only' && needs.release.result == 'skipped'",
-  "SijanC147/homebrew-hextap",
-  "version: 2.39.0",
-  "timeout-minutes: 220",
-  "op://CICD/HOMEBREW_TAP_ACTIONS_TOKEN/credential",
-]
-required_fragments.each do |fragment|
-  abort "missing dispatch guard fragment: #{fragment}" unless dispatch_block.include?(fragment)
-end
-abort "source release workflow still uses the broad tap PAT" if workflow.include?("op://CICD/GH_PAT/credential")
-abort "dispatch must use the workflow endpoint" unless dispatch_script.include?(
-  'actions/workflows/$workflow/dispatches',
-)
-abort "dispatch must request the exact run ID" unless dispatch_script.include?("return_run_details: true")
-unless dispatch_script.include?('run.fetch("path") == ".github/workflows/claude-rc-proxy-release.yml"')
-  abort "dispatch polling does not require the exact REST workflow path"
-end
-if dispatch_script.include?("claude-rc-proxy-release.yml@")
-  abort "dispatch polling still expects a synthetic @ref workflow path"
-end
-if dispatch_script.match?(%r{repos/\$tap_repository/(?:contents|git|dispatches)})
-  abort "Actions-only dispatch path can mutate tap contents"
-end
-unless release_docs.match?(/Actions:\s+Read and write/) && release_docs.match?(/Contents:\s+No access/)
-  abort "release documentation must preserve the Actions-only token boundary"
-end
-abort "release documentation must require immutable releases" unless release_docs.include?("Enable release immutability")
+REPO_ROOT = File.expand_path("..", __dir__)
+WORKFLOW_ROOT = File.join(REPO_ROOT, ".github", "workflows")
+CALLER_PATH = File.join(WORKFLOW_ROOT, "hextap-release.yml")
+LEGACY_CALLER_PATH = File.join(WORKFLOW_ROOT, "release.yml")
+TOOLKIT_CALL = "SijanC147/hextap-toolkit/.github/workflows/release-go.yml"
+TOOLKIT_SHA = "2d4b4615829f983bb4ea7ff2a4b154fb56fd16ea"
+RELEASE_TAGS = ["v0.1.0", "v1.2.3", "v1.2.3-rc.1"].freeze
 
-eligible = lambda do |stable:, mode:, release_result:, cancelled: false|
-  !cancelled && stable && (
-    (mode == "full" && release_result == "success") ||
-    (mode == "homebrew-only" && release_result == "skipped")
-  )
+EXPECTED_CALLER = <<~YAML
+  name: Hextap release
+
+  on:
+    push:
+      tags:
+        - "v*"
+    workflow_dispatch:
+      inputs:
+        tag:
+          description: Existing stable release tag
+          required: true
+          type: string
+
+  permissions:
+    contents: write
+    attestations: write
+    id-token: write
+
+  jobs:
+    release:
+      uses: #{TOOLKIT_CALL}@#{TOOLKIT_SHA} # v0.1.0
+      with:
+        manifest_path: .hextap.json
+        tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        mode: ${{ github.event_name == 'workflow_dispatch' && 'homebrew-only' || 'full' }}
+      secrets:
+        op_service_account_token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+YAML
+
+def workflow_document(path)
+  YAML.safe_load(File.read(path), aliases: true) || {}
+rescue Psych::SyntaxError => e
+  abort "invalid workflow YAML #{path}: #{e.message}"
 end
 
-abort "stable full release must dispatch" unless eligible.call(stable: true, mode: "full", release_result: "success")
-abort "stable recovery must dispatch" unless eligible.call(stable: true, mode: "homebrew-only", release_result: "skipped")
-abort "prerelease must not dispatch" if eligible.call(stable: false, mode: "full", release_result: "success")
-abort "cancelled release must not dispatch" if eligible.call(stable: true, mode: "full", release_result: "success", cancelled: true)
+def pattern_matches?(patterns, tag)
+  included = false
+  patterns.each do |raw_pattern|
+    pattern = raw_pattern.to_s
+    negated = pattern.start_with?("!")
+    candidate = negated ? pattern.delete_prefix("!") : pattern
+    included = !negated if File.fnmatch?(candidate, tag, File::FNM_EXTGLOB)
+  end
+  included
+end
 
-puts "release workflow graph tests passed"
+def responds_to_release_tag?(document)
+  triggers = document["on"] || document[true]
+  return triggers == "push" || (triggers.is_a?(Array) && triggers.include?("push")) unless triggers.is_a?(Hash)
+  return false unless triggers.key?("push")
+
+  push = triggers["push"]
+  return true if push.nil?
+  return false unless push.is_a?(Hash)
+
+  if push.key?("tags")
+    patterns = Array(push["tags"])
+    return RELEASE_TAGS.any? { |tag| pattern_matches?(patterns, tag) }
+  end
+
+  if push.key?("tags-ignore")
+    ignored = Array(push["tags-ignore"])
+    return RELEASE_TAGS.any? do |tag|
+      ignored.none? { |pattern| File.fnmatch?(pattern.to_s, tag, File::FNM_EXTGLOB) }
+    end
+  end
+
+  !(push.key?("branches") || push.key?("branches-ignore"))
+end
+
+abort "legacy release caller remains: #{LEGACY_CALLER_PATH}" if File.exist?(LEGACY_CALLER_PATH)
+abort "managed Hextap caller is missing: #{CALLER_PATH}" unless File.file?(CALLER_PATH)
+
+caller = File.read(CALLER_PATH)
+abort "managed Hextap caller snapshot changed" unless caller == EXPECTED_CALLER
+abort "caller uses mutable @main" if caller.include?("@main")
+abort "caller inherits repository secrets" if caller.include?("secrets: inherit")
+unless caller.scan("op_service_account_token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}").length == 1
+  abort "caller must explicitly map OP_SERVICE_ACCOUNT_TOKEN exactly once"
+end
+
+workflow_paths = Dir.glob(File.join(WORKFLOW_ROOT, "*.{yml,yaml}")).sort
+release_workflows = workflow_paths.select { |path| responds_to_release_tag?(workflow_document(path)) }
+unless release_workflows == [CALLER_PATH]
+  abort "expected exactly one v* tag workflow, found: #{release_workflows.join(", ")}"
+end
+
+toolkit_calls = workflow_paths.flat_map do |path|
+  File.readlines(path, chomp: true).filter_map do |line|
+    line.strip if line.match?(/^\s*uses:\s+#{Regexp.escape(TOOLKIT_CALL)}@/)
+  end
+end
+expected_call = "uses: #{TOOLKIT_CALL}@#{TOOLKIT_SHA} # v0.1.0"
+abort "unexpected reusable Hextap callers: #{toolkit_calls.inspect}" unless toolkit_calls == [expected_call]
+
+mutable_calls = workflow_paths.flat_map do |path|
+  File.readlines(path, chomp: true).grep(/^\s*uses:\s+\S+@main(?:\s|$)/).map { |line| "#{path}: #{line.strip}" }
+end
+abort "mutable workflow calls remain: #{mutable_calls.join(", ")}" unless mutable_calls.empty?
+
+puts "immutable Hextap caller graph and snapshot tests passed"
