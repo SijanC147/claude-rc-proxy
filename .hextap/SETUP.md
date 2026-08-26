@@ -34,4 +34,4 @@ Coordinator bootstrap/recovery is an external adopter task:
 4. Open one tap pull request that adds both `Projects/claude-rc-proxy.json` and the release-backed `Formula/claude-rc-proxy.rb`; merge only after tap CI passes.
 5. Dispatch the existing stable tag in `homebrew-only` mode to finish or recover publication. Do not create a replacement tag.
 
-The caller is pinned to stable toolkit tag `v0.1.0` at full commit `2d4b4615829f983bb4ea7ff2a4b154fb56fd16ea`; keep both the tag comment and immutable SHA provenance when upgrading. Never replace the pin with `@main` or a floating major tag.
+The caller is pinned to stable toolkit tag `v0.1.1` at full commit `f96c843ea73ebbd521fed3ddbd6622e9ba6982d6`; keep both the tag comment and immutable SHA provenance when upgrading. Never replace the pin with `@main` or a floating major tag.
