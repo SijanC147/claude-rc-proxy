@@ -38,6 +38,6 @@
       "log_path": "log/claude-rc-proxy/launchd.log",
       "error_log_path": "log/claude-rc-proxy/launchd.log"
     },
-    "caveats": "Configure {{home}}/.homebrew/services/claude-rc-proxy.env before starting the service. Logs are written below {{var}}/log/claude-rc-proxy."
+    "caveats": "Resolve Homebrew's XDG-aware user configuration root with service_config_home=\"$(brew ruby -e 'print ENV.fetch(\"HOMEBREW_USER_CONFIG_HOME\")')\" and configure $service_config_home/services/claude-rc-proxy.env before starting the service. The file uses KEY=value lines and must contain absolute paths. Set permissions to 0600 and restart the per-user service after edits. Set CLAUDE_RC_PROXY_CA to the machine-local combined signer, CLAUDE_RC_PROXY_TOKEN to the pool credential, and CLAUDE_RC_PROXY_LISTEN to 127.0.0.1:9801. Run without sudo. Service output is written below {{var}}/log/claude-rc-proxy. Claude must trust the public mkcert root separately; never configure NODE_EXTRA_CA_CERTS with the combined signer file."
   }
 }

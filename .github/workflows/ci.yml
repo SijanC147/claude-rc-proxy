@@ -40,8 +40,8 @@ jobs:
       - name: Build native binary
         run: go build -trimpath -o "$RUNNER_TEMP/claude-rc-proxy" .
 
-      - name: Test release metadata
-        run: test -x scripts/hextap-build
+      - name: Test Hextap build adapter
+        run: scripts/test-hextap-build.sh
 
       - name: Check shell scripts
         run: |
@@ -75,6 +75,9 @@ jobs:
         uses: Homebrew/actions/setup-homebrew@a657b8b0cd35d0f65cce41fce9b24cf054b49869 # 2026.08.24.1
         with:
           token: ${{ github.token }}
+
+      - name: Test Hextap build adapter with macOS system Bash
+        run: /bin/bash scripts/test-hextap-build.sh
 
       - name: Install and test snapshot Formula
         run: BREW_BIN="$(command -v brew)" scripts/test-homebrew-install.sh

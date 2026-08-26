@@ -8,10 +8,25 @@ set -euo pipefail
 : "${HEXTAP_VERSION:?}"
 : "${HEXTAP_COMMIT:?}"
 
-[[ "$HEXTAP_TARGET_OS" == darwin || "$HEXTAP_TARGET_OS" == linux ]]
-[[ "$HEXTAP_TARGET_ARCH" == arm64 || "$HEXTAP_TARGET_ARCH" == amd64 ]]
-[[ "$HEXTAP_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-[[ "$HEXTAP_COMMIT" =~ ^[0-9a-f]{7,64}$ ]]
+if [[ "$HEXTAP_TARGET_OS" != darwin && "$HEXTAP_TARGET_OS" != linux ]]; then
+  echo "unsupported Hextap target OS: $HEXTAP_TARGET_OS" >&2
+  exit 64
+fi
+if [[ "$HEXTAP_TARGET_ARCH" != arm64 && "$HEXTAP_TARGET_ARCH" != amd64 ]]; then
+  echo "unsupported Hextap target architecture: $HEXTAP_TARGET_ARCH" >&2
+  exit 64
+fi
+core='(0|[1-9][0-9]*)'
+prerelease_identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+version_regex="^${core}\.${core}\.${core}(-${prerelease_identifier}(\.${prerelease_identifier})*)?$"
+if [[ ! "$HEXTAP_VERSION" =~ $version_regex ]]; then
+  echo "invalid Hextap release version: $HEXTAP_VERSION" >&2
+  exit 64
+fi
+if [[ ! "$HEXTAP_COMMIT" =~ ^[0-9a-f]{7,64}$ ]]; then
+  echo "invalid Hextap commit: $HEXTAP_COMMIT" >&2
+  exit 64
+fi
 
 CGO_ENABLED=0 GOOS="$HEXTAP_TARGET_OS" GOARCH="$HEXTAP_TARGET_ARCH" \
   go build -trimpath \
