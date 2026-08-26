@@ -67,11 +67,18 @@ assert_rejected() {
   fi
 }
 
-mkdir -p "$TEST_ROOT/stable" "$TEST_ROOT/prerelease-one" "$TEST_ROOT/prerelease-two" "$TEST_ROOT/invalid"
+mkdir -p "$TEST_ROOT/stable" "$TEST_ROOT/prerelease-one" "$TEST_ROOT/prerelease-two" \
+  "$TEST_ROOT/homebrew-shim" "$TEST_ROOT/invalid"
 
 stable_binary="$TEST_ROOT/stable/claude-rc-proxy"
 build "1.2.3" "$stable_binary"
 assert_version "$stable_binary" "1.2.3"
+
+printf '#!/bin/sh\nexit 1\n' > "$TEST_ROOT/homebrew-shim/git"
+chmod 0700 "$TEST_ROOT/homebrew-shim/git"
+homebrew_shim_binary="$TEST_ROOT/homebrew-shim/claude-rc-proxy"
+PATH="$TEST_ROOT/homebrew-shim:$PATH" build "1.2.3" "$homebrew_shim_binary"
+assert_version "$homebrew_shim_binary" "1.2.3"
 
 prerelease_one="$TEST_ROOT/prerelease-one/claude-rc-proxy"
 prerelease_two="$TEST_ROOT/prerelease-two/claude-rc-proxy"

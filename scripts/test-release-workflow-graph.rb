@@ -7,8 +7,8 @@ WORKFLOW_ROOT = File.join(REPO_ROOT, ".github", "workflows")
 CALLER_PATH = File.join(WORKFLOW_ROOT, "hextap-release.yml")
 LEGACY_CALLER_PATH = File.join(WORKFLOW_ROOT, "release.yml")
 TOOLKIT_CALL = "SijanC147/hextap-toolkit/.github/workflows/release-go.yml"
-TOOLKIT_SHA = "f96c843ea73ebbd521fed3ddbd6622e9ba6982d6"
-TOOLKIT_TAG = "v0.1.1"
+TOOLKIT_SHA = "ddc8371e522a968b051fba26a64bc0d4c39d4d8b"
+TOOLKIT_TAG = "v0.1.2"
 RELEASE_TAGS = ["v0.1.0", "v1.2.3", "v1.2.3-rc.1"].freeze
 
 EXPECTED_CALLER = <<~YAML
