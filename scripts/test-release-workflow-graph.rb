@@ -7,7 +7,8 @@ WORKFLOW_ROOT = File.join(REPO_ROOT, ".github", "workflows")
 CALLER_PATH = File.join(WORKFLOW_ROOT, "hextap-release.yml")
 LEGACY_CALLER_PATH = File.join(WORKFLOW_ROOT, "release.yml")
 TOOLKIT_CALL = "SijanC147/hextap-toolkit/.github/workflows/release-go.yml"
-TOOLKIT_SHA = "2d4b4615829f983bb4ea7ff2a4b154fb56fd16ea"
+TOOLKIT_SHA = "f96c843ea73ebbd521fed3ddbd6622e9ba6982d6"
+TOOLKIT_TAG = "v0.1.1"
 RELEASE_TAGS = ["v0.1.0", "v1.2.3", "v1.2.3-rc.1"].freeze
 
 EXPECTED_CALLER = <<~YAML
@@ -31,7 +32,7 @@ EXPECTED_CALLER = <<~YAML
 
   jobs:
     release:
-      uses: #{TOOLKIT_CALL}@#{TOOLKIT_SHA} # v0.1.0
+      uses: #{TOOLKIT_CALL}@#{TOOLKIT_SHA} # #{TOOLKIT_TAG}
       with:
         manifest_path: .hextap.json
         tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -103,7 +104,7 @@ toolkit_calls = workflow_paths.flat_map do |path|
     line.strip if line.match?(/^\s*uses:\s+#{Regexp.escape(TOOLKIT_CALL)}@/)
   end
 end
-expected_call = "uses: #{TOOLKIT_CALL}@#{TOOLKIT_SHA} # v0.1.0"
+expected_call = "uses: #{TOOLKIT_CALL}@#{TOOLKIT_SHA} # #{TOOLKIT_TAG}"
 abort "unexpected reusable Hextap callers: #{toolkit_calls.inspect}" unless toolkit_calls == [expected_call]
 
 mutable_calls = workflow_paths.flat_map do |path|
