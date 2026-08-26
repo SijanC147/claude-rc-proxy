@@ -29,6 +29,6 @@ if [[ ! "$HEXTAP_COMMIT" =~ ^[0-9a-f]{7,64}$ ]]; then
 fi
 
 CGO_ENABLED=0 GOOS="$HEXTAP_TARGET_OS" GOARCH="$HEXTAP_TARGET_ARCH" \
-  go build -trimpath \
+  go build -mod=readonly -trimpath -buildvcs=false \
   -ldflags "-s -w -X main.version=$HEXTAP_VERSION -X main.commit=$HEXTAP_COMMIT" \
   -o "$HEXTAP_OUTPUT" .
