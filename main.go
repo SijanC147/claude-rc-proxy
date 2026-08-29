@@ -23,8 +23,17 @@
 //
 // 设计上的取舍(都是有意的)
 // ──────────────────────────
-//   - **对客户端只协商 HTTP/1.1**(ALPN 不宣告 h2)。Claude Code 会自动降级,
-//     功能不受影响。换来少一整类 h2 + 流式的坑(之前被坑过)。对上游仍然走 h2。
+//   - **重启不能续上正在流式吐字的那一轮**。/v1/messages 是一条流,进程一死
+//     TCP 就 RST,那一轮已经结束。能做的是让 9801 **立刻又能接新 CONNECT**,
+//     这样老窗口不用关:RC 心跳自己重连,用户点 retry / 发下一条即通。
+//     做不到的是把已掐断的生成无缝接回去。
+//   - **客户端和对上游都走 HTTP/1.1**。对客户端 ALPN 不宣告 h2(Claude Code
+//     会自动降级)。对上游曾经 ForceAttemptHTTP2 想省连接,结果几十个 session
+//     的 RC 长轮询 / 心跳 / 日志复用到 Anthropic 的少数几条 H2 上;对端一发
+//     INTERNAL_ERROR,全体一起 timeout。2026-08-25 实测:进程生命周期内 383 次
+//     H2 INTERNAL_ERROR,卡死时段伴随 TLS handshake timeout 风暴。H1 下一条
+//     连接死只死自己。为避免重启时几十个 session 同时重连打出 TLS 握手风暴,
+//     新握手最多并发 4 条;握手完成后长轮询照常各走各的 H1 连接。
 //   - **非 api.anthropic.com 的 CONNECT 一律裸隧道对拷**,不解 TLS。
 //     这些流量我们既不看也不改,解了纯属浪费 —— 旧版一次会话白扛 1139 条这种连接。
 //   - **绝不整体读取请求体**。推理请求体是整个对话历史(实测有 4MB 的),
@@ -38,6 +47,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -67,17 +77,23 @@ import (
 )
 
 const (
-	anthropicHost = "api.anthropic.com"
-	upstreamPool  = "127.0.0.1:8080" // Anthropic-compatible inference proxy
+	anthropicHost             = "api.anthropic.com"
+	upstreamPool              = "127.0.0.1:8080" // Anthropic-compatible inference proxy
+	anthropicTLSMaxConcurrent = 4
 )
 
 var (
-	version    = "dev"
-	commit     = "unknown"
-	listenAddr = envOr("CLAUDE_RC_PROXY_LISTEN", "127.0.0.1:9801")
-	poolToken  = os.Getenv("CLAUDE_RC_PROXY_TOKEN")
-	verbose    = os.Getenv("CLAUDE_RC_PROXY_VERBOSE") == "1"
-	caPath     = envOr("CLAUDE_RC_PROXY_CA", os.ExpandEnv("$HOME/.mitmproxy/mitmproxy-ca.pem"))
+	version        = "dev"
+	commit         = "unknown"
+	listenAddr     = envOr("CLAUDE_RC_PROXY_LISTEN", "127.0.0.1:9801")
+	poolToken      = os.Getenv("CLAUDE_RC_PROXY_TOKEN")
+	verbose        = os.Getenv("CLAUDE_RC_PROXY_VERBOSE") == "1"
+	caPath         = envOr("CLAUDE_RC_PROXY_CA", os.ExpandEnv("$HOME/.mitmproxy/mitmproxy-ca.pem"))
+	upstreamDialer = &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	anthropicTLSGate = make(chan struct{}, anthropicTLSMaxConcurrent)
 )
 
 func envOr(k, def string) string {
@@ -439,6 +455,43 @@ func makeReplayableControlBody(r *http.Request) bool {
 
 // ──────────────────────── 反向代理:两条路由 ────────────────────────
 
+// dialAnthropicTLS 只限制昂贵的 TCP+TLS 建连阶段,不限制已经建立的 RC 长轮询。
+// 进程重启时几十个 Claude Code session 会同时重连;不做背压会让 Anthropic
+// 端出现成片 TLS handshake timeout,随后所有客户端一起重试,形成正反馈风暴。
+func dialAnthropicTLS(ctx context.Context, network, addr string) (net.Conn, error) {
+	select {
+	case anthropicTLSGate <- struct{}{}:
+		defer func() { <-anthropicTLSGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	raw, err := upstreamDialer.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	conn := tls.Client(raw, &tls.Config{
+		ServerName: host,
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"http/1.1"},
+	})
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	if err := conn.HandshakeContext(ctx); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, nil
+}
+
 func newReverseProxy(minter *certMinter) *httputil.ReverseProxy {
 	poolURL := &url.URL{Scheme: "http", Host: upstreamPool}
 	realURL := &url.URL{Scheme: "https", Host: anthropicHost}
@@ -449,12 +502,14 @@ func newReverseProxy(minter *certMinter) *httputil.ReverseProxy {
 		FlushInterval: -1,
 		Transport: &http.Transport{
 			Proxy:                 nil, // 我们**就是**代理,绝不能再套一层,否则自环
+			DialContext:           upstreamDialer.DialContext,
+			DialTLSContext:        dialAnthropicTLS,
 			MaxIdleConns:          512,
 			MaxIdleConnsPerHost:   128,
 			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   15 * time.Second,
 			ExpectContinueTimeout: time.Second,
-			ForceAttemptHTTP2:     true, // 对上游用 h2,省连接
+			// 禁止上游 H2。省连接的代价是所有 session 共享故障域,见文件头。
+			ForceAttemptHTTP2: false,
 		},
 		Director: func(r *http.Request) {
 			path := r.URL.Path
@@ -623,6 +678,14 @@ type proxy struct {
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 明文 /healthz 只给本机 watchdog 用。Claude Code 走 CONNECT,不会打到这里。
+	// 必须在分流之前拦下来:否则旧逻辑会把它当控制面转给 api.anthropic.com。
+	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+		return
+	}
 	if r.Method == http.MethodConnect {
 		p.handleConnect(w, r)
 		return
@@ -666,7 +729,7 @@ func (p *proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	tlsConn := tls.Server(clientConn, &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 		// 只宣告 http/1.1:客户端会自动降级,功能不受影响,
-		// 换来少一整类 h2 + 流式的坑。对上游仍然走 h2。
+		// 换来少一整类 h2 + 流式的坑。对上游同样固定为 HTTP/1.1。
 		NextProtos: []string{"http/1.1"},
 		MinVersion: tls.VersionTLS12,
 	})
@@ -681,7 +744,7 @@ func (p *proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		ReadHeaderTimeout: 30 * time.Second,
 		// 不设 WriteTimeout:RC 的 /bridge 长轮询会挂很久,设了会被腰斩。
 	}
-	_ = srv.Serve(&oneShotListener{conn: tlsConn, addr: clientConn.RemoteAddr()})
+	_ = srv.Serve(newOneShotListener(tlsConn, clientConn.RemoteAddr()))
 }
 
 func (p *proxy) tunnel(client net.Conn, hostPort string) {
@@ -703,17 +766,42 @@ func (p *proxy) tunnel(client net.Conn, hostPort string) {
 // oneShotListener 把单条已建立的连接包装成 net.Listener,
 // 好让 http.Server 接管它(从而白拿 keep-alive、chunked、并发请求解析)。
 type oneShotListener struct {
-	conn net.Conn
-	addr net.Addr
-	once sync.Once
-	done chan struct{}
+	conn       net.Conn
+	addr       net.Addr
+	acceptOnce sync.Once
+	closeOnce  sync.Once
+	done       chan struct{}
+}
+
+func newOneShotListener(conn net.Conn, addr net.Addr) *oneShotListener {
+	return &oneShotListener{
+		conn: conn,
+		addr: addr,
+		done: make(chan struct{}),
+	}
+}
+
+type closeNotifyConn struct {
+	net.Conn
+	once    sync.Once
+	onClose func()
+}
+
+func (c *closeNotifyConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.onClose)
+	return err
 }
 
 func (l *oneShotListener) Accept() (net.Conn, error) {
 	var c net.Conn
-	l.once.Do(func() {
-		l.done = make(chan struct{})
-		c = l.conn
+	l.acceptOnce.Do(func() {
+		select {
+		case <-l.done:
+			return
+		default:
+		}
+		c = &closeNotifyConn{Conn: l.conn, onClose: l.signalDone}
 	})
 	if c != nil {
 		return c, nil
@@ -723,13 +811,12 @@ func (l *oneShotListener) Accept() (net.Conn, error) {
 }
 
 func (l *oneShotListener) Close() error {
-	l.once.Do(func() { l.done = make(chan struct{}) })
-	select {
-	case <-l.done:
-	default:
-		close(l.done)
-	}
+	l.signalDone()
 	return nil
+}
+
+func (l *oneShotListener) signalDone() {
+	l.closeOnce.Do(func() { close(l.done) })
 }
 
 func (l *oneShotListener) Addr() net.Addr { return l.addr }
